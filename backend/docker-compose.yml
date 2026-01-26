@@ -1,0 +1,59 @@
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth_service/Dockerfile
+    ports:
+      - "8001:8080"
+    env_file: .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  journey:
+    build:
+      context: .
+      dockerfile: services/journey_service/Dockerfile
+    ports:
+      - "8002:8080"
+    env_file: .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    depends_on:
+      auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  webhook:
+    build:
+      context: .
+      dockerfile: services/webhook_service/Dockerfile
+    ports:
+      - "8004:8080"
+    env_file: .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - JOURNEY_SERVICE_URL=http://journey:8080
+    depends_on:
+      journey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+    name: oasis-network

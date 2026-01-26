@@ -1,0 +1,126 @@
+# ============================================================================
+# Infrastructure Setup Workflow
+#
+# One-time workflow to provision GCP infrastructure:
+# - Enable APIs
+# - Create Artifact Registry repository
+# - Setup Workload Identity Federation
+#
+# Run this workflow manually when:
+# - Setting up a new environment
+# - Adding new services that need infrastructure
+# ============================================================================
+
+name: Infrastructure Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to setup'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      create_secrets:
+        description: 'Also create Secret Manager secrets'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  GCP_REGION: us-central1
+  REPO_NAME: oasis-api
+
+jobs:
+  setup-infrastructure:
+    name: Setup GCP Infrastructure (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Enable required APIs
+        run: |
+          gcloud services enable \
+            run.googleapis.com \
+            artifactregistry.googleapis.com \
+            secretmanager.googleapis.com \
+            iamcredentials.googleapis.com
+
+      - name: Create Artifact Registry repository
+        run: |
+          if ! gcloud artifacts repositories describe ${{ env.REPO_NAME }} \
+            --location=${{ env.GCP_REGION }} 2>/dev/null; then
+            gcloud artifacts repositories create ${{ env.REPO_NAME }} \
+              --repository-format=docker \
+              --location=${{ env.GCP_REGION }} \
+              --description="OASIS API Docker images"
+            echo "Repository created"
+          else
+            echo "Repository already exists"
+          fi
+
+      - name: Create Secret Manager secrets
+        if: ${{ inputs.create_secrets }}
+        run: |
+          ENV_SUFFIX=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+
+          SECRETS=(
+            "SUPABASE_URL_${ENV_SUFFIX}"
+            "SUPABASE_ANON_KEY_${ENV_SUFFIX}"
+            "SUPABASE_SERVICE_ROLE_KEY_${ENV_SUFFIX}"
+            "SUPABASE_JWT_SECRET_${ENV_SUFFIX}"
+            "GOOGLE_API_KEY_${ENV_SUFFIX}"
+            "SERVICE_TO_SERVICE_TOKEN_${ENV_SUFFIX}"
+            "WEBHOOK_TYPEFORM_SECRET_${ENV_SUFFIX}"
+            "WEBHOOK_STRIPE_SECRET_${ENV_SUFFIX}"
+            "JWT_ALGORITHM"
+          )
+
+          for SECRET in "${SECRETS[@]}"; do
+            if ! gcloud secrets describe "$SECRET" 2>/dev/null; then
+              gcloud secrets create "$SECRET" \
+                --replication-policy="automatic" \
+                --labels="environment=${{ inputs.environment }},app=oasis-api"
+              echo "Created secret: $SECRET"
+            else
+              echo "Secret already exists: $SECRET"
+            fi
+          done
+
+      - name: Print summary
+        run: |
+          echo "============================================"
+          echo "Infrastructure Setup Complete!"
+          echo "============================================"
+          echo ""
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Project ID: ${{ secrets.GCP_PROJECT_ID }}"
+          echo "Region: ${{ env.GCP_REGION }}"
+          echo ""
+          echo "Artifact Registry:"
+          echo "  ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Add secret values in Secret Manager console"
+          echo "2. Push to 'develop' branch to trigger deployment"

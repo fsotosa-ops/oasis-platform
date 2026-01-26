@@ -40,7 +40,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Copy application code
 COPY common/ ./common/
-COPY services/auth_service/ ./services/auth_service/
+COPY services/webhook_service/ ./services/webhook_service/
 
 # Change ownership to non-root user
 RUN chown -R appuser:appgroup /app
@@ -57,4 +57,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/health')" || exit 1
 
 # Run the application
-CMD ["sh", "-c", "uvicorn services.auth_service.main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn services.webhook_service.main:app --host 0.0.0.0 --port ${PORT}"]
