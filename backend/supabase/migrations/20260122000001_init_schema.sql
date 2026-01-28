@@ -91,7 +91,7 @@ CREATE TRIGGER update_profiles_updated_at
 -- 4. ORGANIZATIONS TABLE
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS public.organizations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Identity
     name TEXT NOT NULL,
@@ -120,7 +120,7 @@ CREATE TRIGGER update_organizations_updated_at
 -- 5. ORGANIZATION MEMBERS TABLE (Junction with roles)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS public.organization_members (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Relationships
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,

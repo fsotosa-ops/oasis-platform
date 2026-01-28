@@ -38,7 +38,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Journeys: Las "Rutas" de experiencia
 CREATE TABLE IF NOT EXISTS journeys.journeys (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
 
     title TEXT NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS journeys.journeys (
 
 -- Pasos: Los bloques constructivos
 CREATE TABLE IF NOT EXISTS journeys.steps (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     journey_id UUID NOT NULL REFERENCES journeys.journeys(id) ON DELETE CASCADE,
 
     title TEXT NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS journeys.steps (
 
 -- Inscripciones: Vincula Usuario <-> Journey
 CREATE TABLE IF NOT EXISTS journeys.enrollments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     journey_id UUID NOT NULL REFERENCES journeys.journeys(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
 
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS journeys.enrollments (
 -- Progreso detallado: Cada paso completado
 -- Denormalizado con user_id y journey_id para queries de analytics sin JOINs
 CREATE TABLE IF NOT EXISTS journeys.step_completions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     enrollment_id UUID NOT NULL REFERENCES journeys.enrollments(id) ON DELETE CASCADE,
     step_id UUID NOT NULL REFERENCES journeys.steps(id) ON DELETE CASCADE,
 
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS journeys.step_completions (
 
 -- Niveles Dinámicos (Configurables por Organización)
 CREATE TABLE IF NOT EXISTS journeys.levels (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
 
     name TEXT NOT NULL,          -- Ej: "Semilla", "Brote", "Árbol"
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS journeys.levels (
 -- Actividades "Side-Quest" (Fuera de un Journey lineal)
 -- Ej: Comentar en el foro, Dar like, Ver un recurso suelto
 CREATE TABLE IF NOT EXISTS journeys.user_activities (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
 
     type TEXT NOT NULL, -- 'social_post', 'resource_view'
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS journeys.user_activities (
 
 -- Catálogo de Recompensas (Insignias)
 CREATE TABLE IF NOT EXISTS journeys.rewards_catalog (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
 
     name TEXT NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS journeys.rewards_catalog (
 
 -- Inventario de Recompensas del Usuario
 CREATE TABLE IF NOT EXISTS journeys.user_rewards (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     reward_id UUID NOT NULL REFERENCES journeys.rewards_catalog(id) ON DELETE CASCADE,
 
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS journeys.user_rewards (
 
 -- Ledger Transaccional de Puntos (Auditoría de Gamificación)
 CREATE TABLE IF NOT EXISTS journeys.points_ledger (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     amount INT NOT NULL,
 

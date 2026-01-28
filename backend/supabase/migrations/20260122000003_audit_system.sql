@@ -56,7 +56,7 @@ ON CONFLICT (code) DO NOTHING;
 
 -- Logs table (The audit trail)
 CREATE TABLE IF NOT EXISTS audit.logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     occurred_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- Who and Where

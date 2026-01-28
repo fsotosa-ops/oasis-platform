@@ -11,7 +11,7 @@ CREATE SCHEMA IF NOT EXISTS webhooks;
 -- Raw Event Storage (All events persisted before processing)
 -- ============================================================================
 CREATE TABLE webhooks.events (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Provider identification
     provider TEXT NOT NULL,           -- 'typeform', 'stripe', 'zoom'
@@ -49,7 +49,7 @@ CREATE INDEX idx_events_organization ON webhooks.events(organization_id) WHERE o
 -- Dead Letter Queue (Failed events for retry)
 -- ============================================================================
 CREATE TABLE webhooks.dead_letter_queue (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Reference to original event
     event_id UUID NOT NULL REFERENCES webhooks.events(id) ON DELETE CASCADE,

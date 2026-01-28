@@ -10,9 +10,10 @@ import {
     Calendar, 
     FileText, 
     LogOut,
-    Home
+    Home,
+    Settings // [NUEVO] Importamos el icono
 } from "lucide-react";
-import { createClient } from "@/backend/supabase/client";
+import { createClient } from "@/backend/supabase/client"; // Asegúrate de que esta ruta sea correcta
 import Image from "next/image";
 import { KatyLegacyWidget } from "@/frontend/components/layout/KatyLegacyWidget";
 import { InstagramFeedWidget } from './InstagramFeedWidget';
@@ -20,28 +21,11 @@ import { InstagramFeedWidget } from './InstagramFeedWidget';
 export function Sidebar() {
     const pathname = usePathname();
     const supabase = createClient();
-    
-    // In a real app, we would get the role from context/user profile
-    // For now we can infer or show generic links. 
-    // Ideally, we fetch the profile in the LayoutServer and pass it down, or use a context.
-    // For this prototype, I'll list all common links but visually grouped.
 
-    // In a real app, we would get the role from context/user profile
-    // For now we can infer or show generic links. 
-    // Ideally, we fetch the profile in the LayoutServer and pass it down, or use a context.
-    // For this prototype, I'll list all common links but visually grouped.
-
-    // Removing "Contenidos" from Staff links based on "Elimina la sección contenidos"
-    // And "Eventos" moved to "Mi OASIS" as per request description? 
-    // "Mi OASIS ... (Mi viaje, Recursos, Comunidad y Eventos)"
-    // "Staff OASIS ... Dashboard y CRM"
-
-    // Let's refine the lists
     const sectionMiOasis = [
         { href: "/participant", label: "Mi Viaje", icon: Home },
         { href: "/participant/resources", label: "Recursos", icon: FileText },
         { href: "/participant/community", label: "Comunidad", icon: Users },
-        // If "Eventos" is for participants, it should probably be a participant route, but using existing generic for now
         { href: "/admin/events", label: "Eventos", icon: Calendar }, 
     ];
 
@@ -120,17 +104,32 @@ export function Sidebar() {
                     <KatyLegacyWidget />
                  </div>
 
-                 <Button 
-                    variant="ghost" 
-                    onClick={async () => {
-                        await supabase.auth.signOut();
-                        window.location.href = '/login'; 
-                    }}
-                    className="w-full flex items-center justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600 px-4 cursor-pointer"
-                >
-                    <LogOut className="h-5 w-5" />
-                    <span className="hidden md:block font-medium">Salir</span>
-                </Button>
+                 {/* [NUEVO] Sección Configuración integrada con tu estilo */}
+                 <div className="border-t border-gray-100 pt-4 space-y-1">
+                    <Link href="/settings" className="block group">
+                        <div className={cn(
+                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200",
+                            pathname === "/settings"
+                                ? "bg-gray-100 text-black font-bold" 
+                                : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                        )}>
+                            <Settings className="h-4 w-4 transition-colors group-hover:animate-spin-slow" />
+                            <span className="hidden md:block text-sm">Configuración</span>
+                        </div>
+                    </Link>
+
+                    <Button 
+                        variant="ghost" 
+                        onClick={async () => {
+                            await supabase.auth.signOut();
+                            window.location.href = '/login'; 
+                        }}
+                        className="w-full flex items-center justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600 px-3 cursor-pointer"
+                    >
+                        <LogOut className="h-4 w-4" />
+                        <span className="hidden md:block font-medium text-sm">Salir</span>
+                    </Button>
+                 </div>
             </div>
         </aside>
     );
