@@ -1,3 +1,4 @@
+// src/frontend/components/dashboard/Sidebar.tsx (o donde lo tengas ubicado)
 "use client";
 
 import Link from "next/link";
@@ -6,6 +7,8 @@ import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/components/ui/button";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { useAuth } from "@/features/auth/hooks/useAuth";
+import { useViewMode } from "@/frontend/context/ViewModeContext"; // Nuevo Contexto
+import { ViewModeSwitcher } from "@/frontend/components/layout/ViewModeSwitcher"; // Nuevo Componente
 import { 
   LayoutDashboard, 
   Users, 
@@ -58,8 +61,9 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { profile, isLoading, signOut } = useAuth();
+  const { viewMode } = useViewMode(); // Hook para saber en qué modo estamos
 
-  // Función de Logout usando signOut del contexto
+  // Función de Logout
   const handleLogout = async () => {
     try {
       await signOut();
@@ -68,26 +72,29 @@ export function Sidebar() {
       router.refresh();
     } catch (error) {
       console.error("Error logout", error);
-      // Forzar redirección incluso si falla la API
       window.location.href = "/login";
     }
   };
 
-  // Lógica de selección de menú (Tipada correctamente)
+  // Lógica de selección de menú REFACTORIZADA
   let items: SidebarItem[] = [];
 
   if (!isLoading && profile) {
-    // Verificamos is_platform_admin o el rol string (cast seguro)
-    const role = (profile as any).role; // Cast temporal si el tipo falla
-    const isAdmin = profile.is_platform_admin || role === 'admin' || role === 'owner';
-    const isFacilitador = role === 'facilitador';
-
-    if (isFacilitador) {
-      items = facilitatorRoutes;
-    } else if (isAdmin) {
-      items = adminRoutes;
-    } else {
+    if (viewMode === 'participant') {
+      // 1. Si el modo es participante, SIEMPRE mostramos rutas de participante
+      // sin importar si es admin en la BD.
       items = participantRoutes;
+    } else {
+      // 2. Si el modo es gestión (management), decidimos qué menú de gestión mostrar
+      const role = (profile as any).role;
+      const isFacilitador = role === 'facilitador';
+      
+      // Si es facilitador, menú facilitador. Si es admin/owner, menú admin.
+      if (isFacilitador) {
+        items = facilitatorRoutes;
+      } else {
+        items = adminRoutes;
+      }
     }
   }
 
@@ -96,18 +103,20 @@ export function Sidebar() {
   }
 
   return (
-    <div className="relative border-r bg-background pb-12 w-64 hidden md:flex md:flex-col h-screen">
-      <div className="space-y-4 py-4 flex-1">
-        <div className="px-3 py-2">
+    <div className="relative border-r bg-background pb-0 w-64 hidden md:flex md:flex-col h-screen">
+      <div className="space-y-4 py-4 flex-1 flex flex-col h-full">
+        <div className="px-3 py-2 flex-1 flex flex-col overflow-hidden">
           <h2 className="mb-6 px-4 text-xl font-bold tracking-tight text-primary flex items-center gap-2">
             <ShieldAlert className="h-6 w-6" />
             OASIS
           </h2>
-          <div className="space-y-1">
-            <ScrollArea className="h-[calc(100vh-10rem)]">
-              <nav className="grid gap-1 px-2">
+          
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
+              <nav className="grid gap-1 px-2 pb-4">
                 {items.map((item, index) => {
                   const Icon = item.icon;
+                  // Lógica activa mejorada para incluir subrutas
                   const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
                   
                   return (
@@ -131,18 +140,24 @@ export function Sidebar() {
             </ScrollArea>
           </div>
         </div>
-      </div>
 
-      {/* Botón de Logout en el Footer del Sidebar */}
-      <div className="p-4 border-t bg-muted/20">
-        <Button 
-          variant="outline" 
-          className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-          onClick={handleLogout}
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          Cerrar Sesión
-        </Button>
+        {/* ZONA INFERIOR FIJA */}
+        <div className="mt-auto">
+          {/* 1. Switcher de Modos (Nuevo componente) */}
+          <ViewModeSwitcher />
+
+          {/* 2. Botón de Logout */}
+          <div className="p-4 border-t bg-muted/20">
+            <Button 
+              variant="outline" 
+              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+              onClick={handleLogout}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Cerrar Sesión
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

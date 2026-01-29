@@ -1,34 +1,32 @@
-"use client";
-
-import { Sidebar } from "@/shared/components/layout/Sidebar";
-import { BackgroundWaves } from "@/shared/visuals/BackgroundWaves";
-import { OASISChat } from "@/frontend/components/ai/OASISChat";
-import { ForumBanner } from "@/frontend/components/participant/ForumBanner";
-import { AuthProvider } from "@/features/auth/context/AuthProvider";
+// src/app/(platform)/layout.tsx
+import React from 'react';
+import { AuthProvider } from '@/features/auth/context/AuthProvider';
+import { ViewModeProvider } from '@/frontend/context/ViewModeContext';
+import { Sidebar } from '@/shared/components/layout/Sidebar'; 
+import { Header } from '@/shared/components/layout/Header'; // Asumiendo que usas este header
 
 export default function PlatformLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
+    /* 1. AuthProvider primero (autenticación base) */
     <AuthProvider>
-      <div className="relative min-h-screen bg-gray-50/50 flex overflow-hidden">
-          <BackgroundWaves />
-
+      {/* 2. ViewModeProvider envuelve TODO el contenido visible, incluido el Sidebar */}
+      <ViewModeProvider>
+        <div className="flex h-screen bg-gray-50 overflow-hidden">
+          {/* Al estar dentro del Provider, el Sidebar ya puede usar useViewMode */}
           <Sidebar />
-
-          <main className="flex-1 relative z-10 h-screen overflow-y-auto w-full flex flex-col">
-              <ForumBanner />
-              <div className="p-4 md:p-8 flex-1">
-                  <div className="max-w-7xl mx-auto">
-                      {children}
-                  </div>
-              </div>
-          </main>
-
-          <OASISChat />
-      </div>
+          
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <Header />
+            <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-6">
+              {children}
+            </main>
+          </div>
+        </div>
+      </ViewModeProvider>
     </AuthProvider>
   );
 }
