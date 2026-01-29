@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Crear respuesta inicial
+  // Necesario para que el cliente de Supabase pueda manipular las cabeceras
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -26,11 +27,17 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          // Actualizar request cookies para que el servidor las vea
+          // CORRECCIÓN TS: Actualizar request cookies solo con name y value (2 argumentos)
           cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value);
           });
-          // Actualizar response cookies para que el navegador las guarde
+          
+          // Actualizar la respuesta (response) para pasar las cookies actualizadas al siguiente paso
+          response = NextResponse.next({
+            request,
+          });
+
+          // CORRECCIÓN TS: Actualizar response cookies con opciones (3 argumentos)
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
@@ -39,13 +46,15 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // 3. Refrescar sesión (esto puede modificar las cookies en 'response')
+  // 3. Refrescar sesión (esto ejecutará setAll si es necesario)
+  // IMPORTANTE: No usar la variable 'user' extraída directamente aquí para lógica compleja posterior
+  // si el token se refrescó, es mejor confiar en getUser() limpio.
   const { data: { user }, error } = await supabase.auth.getUser();
 
   // 4. Verificar ruta pública
   const isPublic = PUBLIC_ROUTES.some(route => matchRoute(pathname, route));
 
-  // --- LÓGICA DE REDIRECCIÓN CON PRESERVACIÓN DE COOKIES ---
+  // --- LÓGICA DE REDIRECCIÓN ---
 
   // CASO A: Usuario NO autenticado
   if (error || !user) {
@@ -56,32 +65,30 @@ export async function middleware(request: NextRequest) {
 
     // Si es privada, redirigimos al login
     const loginUrl = new URL('/login', request.url);
+    // Guardamos a dónde quería ir para redirigirlo después
     loginUrl.searchParams.set('redirect', pathname);
     
-    // IMPORTANTE: Crear redirección y copiar las cookies de la respuesta original
-    // (por si supabase intentó limpiar una sesión inválida)
-    const redirectResponse = NextResponse.redirect(loginUrl);
-    copyCookies(response, redirectResponse);
-    return redirectResponse;
+    return NextResponse.redirect(loginUrl);
   }
 
   // CASO B: Usuario autenticado
   if (user) {
-    // Si intenta entrar a login/register estando logueado -> ir a Dashboard
+    // Si intenta entrar a login/register estando logueado -> ir a la Raíz (Dispatcher)
+    // CAMBIO: Antes iba a '/participant', ahora va a '/' para que page.tsx decida.
     if (isPublic && (pathname === '/login' || pathname === '/register')) {
-      const dashboardUrl = new URL('/participant', request.url);
-      const redirectResponse = NextResponse.redirect(dashboardUrl);
-      copyCookies(response, redirectResponse);
-      return redirectResponse;
+      const rootUrl = new URL('/', request.url);
+      return NextResponse.redirect(rootUrl);
     }
   }
 
-  // 5. Verificación de Roles (RBAC) para rutas protegidas
+  // 5. Verificación de Roles (RBAC) para rutas protegidas [LÓGICA ORIGINAL RESTAURADA]
   const routeConfig = findRouteConfig(pathname);
 
   if (routeConfig) {
+    // Si la ruta requiere configuración especial
     const orgId = request.cookies.get(ORG_COOKIE_NAME)?.value;
 
+    // Validación: Solo Platform Admins
     if (routeConfig.isPlatformAdminOnly) {
       const { data: profile } = await supabase
         .from('profiles')
@@ -90,11 +97,12 @@ export async function middleware(request: NextRequest) {
         .single();
 
       if (!profile?.is_platform_admin) {
-        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
-        copyCookies(response, redirectResponse);
-        return redirectResponse;
+        // Si no tiene permiso, lo mandamos a la raíz (o a 403)
+        return NextResponse.redirect(new URL('/', request.url));
       }
-    } else if (routeConfig.minRole || routeConfig.roles) {
+    } 
+    // Validación: Roles de Organización
+    else if (routeConfig.minRole || routeConfig.roles) {
       let memberQuery = supabase
         .from('organization_members')
         .select('role')
@@ -108,20 +116,18 @@ export async function middleware(request: NextRequest) {
       const { data: membership } = await memberQuery.limit(1).single();
 
       if (!membership) {
-        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
-        copyCookies(response, redirectResponse);
-        return redirectResponse;
+        // No es miembro -> fuera
+        return NextResponse.redirect(new URL('/', request.url));
       }
 
       const userRole = membership.role as OrganizationRole;
 
+      // Verificar si cumple el rol mínimo o está en la lista de roles permitidos
       if (
         (routeConfig.roles && !routeConfig.roles.includes(userRole)) ||
         (routeConfig.minRole && !hasPermission(userRole, routeConfig.minRole))
       ) {
-        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
-        copyCookies(response, redirectResponse);
-        return redirectResponse;
+        return NextResponse.redirect(new URL('/', request.url));
       }
     }
   }
@@ -129,18 +135,15 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-/**
- * Función auxiliar para transferir cookies entre respuestas.
- * Esto evita que se pierda la sesión (o el cierre de sesión) al redirigir.
- */
-function copyCookies(source: NextResponse, target: NextResponse) {
-  source.cookies.getAll().forEach((cookie) => {
-    target.cookies.set(cookie);
-  });
-}
-
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder files (svg, png, etc)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

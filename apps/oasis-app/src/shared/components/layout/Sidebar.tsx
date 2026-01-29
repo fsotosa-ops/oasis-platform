@@ -1,35 +1,27 @@
-// src/frontend/components/dashboard/Sidebar.tsx (o donde lo tengas ubicado)
 "use client";
 
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/components/ui/button";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { useAuth } from "@/features/auth/hooks/useAuth";
-import { useViewMode } from "@/frontend/context/ViewModeContext"; // Nuevo Contexto
-import { ViewModeSwitcher } from "@/frontend/components/layout/ViewModeSwitcher"; // Nuevo Componente
+import { useViewMode } from "@/frontend/context/ViewModeContext";
+import { ViewModeSwitcher } from "@/frontend/components/layout/ViewModeSwitcher";
 import { 
-  LayoutDashboard, 
-  Users, 
-  Settings, 
-  Map, 
-  LogOut,
-  ShieldAlert,
-  GraduationCap,
-  Calendar,
-  Database
+  LayoutDashboard, Users, Settings, Map, LogOut, ShieldAlert,
+  GraduationCap, Calendar, Database, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
 
-// Definimos la interfaz para los items del menú
+// --- CONFIGURACIÓN DE MENÚS ---
 interface SidebarItem {
   title: string;
   href: string;
   icon: React.ElementType;
 }
 
-// Menú para Admins (Plataforma y Organización)
 const adminRoutes: SidebarItem[] = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { title: "Journeys", href: "/admin/journeys", icon: Map },
@@ -40,7 +32,6 @@ const adminRoutes: SidebarItem[] = [
   { title: "Configuración", href: "/settings", icon: Settings },
 ];
 
-// Menú para Participantes
 const participantRoutes: SidebarItem[] = [
   { title: "Inicio", href: "/participant", icon: LayoutDashboard },
   { title: "Mis Viajes", href: "/participant/journey", icon: Map },
@@ -49,10 +40,9 @@ const participantRoutes: SidebarItem[] = [
   { title: "Comunidad", href: "/participant/community", icon: Users },
 ];
 
-// Menú para Facilitadores
 const facilitatorRoutes: SidebarItem[] = [
-  { title: "Mi Panel", href: "/facilitator", icon: LayoutDashboard },
-  { title: "Participantes", href: "/facilitator/participants", icon: Users },
+  { title: "Panel", href: "/facilitator", icon: LayoutDashboard },
+  { title: "Grupos", href: "/facilitator/participants", icon: Users },
   { title: "Journeys", href: "/facilitator/journeys", icon: Map },
   { title: "Configuración", href: "/settings", icon: Settings },
 ];
@@ -61,36 +51,32 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { profile, isLoading, signOut } = useAuth();
-  const { viewMode } = useViewMode(); // Hook para saber en qué modo estamos
+  const { viewMode } = useViewMode();
+  
+  // Estado para colapsar el sidebar
+  // Puedes inicializarlo leyendo localStorage si quieres persistencia
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Función de Logout
   const handleLogout = async () => {
     try {
       await signOut();
-      toast.success("Sesión cerrada");
+      toast.success("Sesión cerrada correctamente");
       router.push("/login");
-      router.refresh();
     } catch (error) {
-      console.error("Error logout", error);
-      window.location.href = "/login";
+      console.error("Logout error", error);
     }
   };
 
-  // Lógica de selección de menú REFACTORIZADA
+  // Selección dinámica de items basada en ViewModeContext
   let items: SidebarItem[] = [];
 
   if (!isLoading && profile) {
     if (viewMode === 'participant') {
-      // 1. Si el modo es participante, SIEMPRE mostramos rutas de participante
-      // sin importar si es admin en la BD.
       items = participantRoutes;
     } else {
-      // 2. Si el modo es gestión (management), decidimos qué menú de gestión mostrar
+      // Modo Gestión: Diferenciar entre Admin y Facilitador
       const role = (profile as any).role;
-      const isFacilitador = role === 'facilitador';
-      
-      // Si es facilitador, menú facilitador. Si es admin/owner, menú admin.
-      if (isFacilitador) {
+      if (role === 'facilitador' || role === 'facilitator') {
         items = facilitatorRoutes;
       } else {
         items = adminRoutes;
@@ -98,65 +84,93 @@ export function Sidebar() {
     }
   }
 
-  if (isLoading) {
-    return <div className="w-64 border-r bg-background p-4 hidden md:block">Cargando menú...</div>;
-  }
-
   return (
-    <div className="relative border-r bg-background pb-0 w-64 hidden md:flex md:flex-col h-screen">
-      <div className="space-y-4 py-4 flex-1 flex flex-col h-full">
-        <div className="px-3 py-2 flex-1 flex flex-col overflow-hidden">
-          <h2 className="mb-6 px-4 text-xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <ShieldAlert className="h-6 w-6" />
-            OASIS
-          </h2>
-          
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              <nav className="grid gap-1 px-2 pb-4">
-                {items.map((item, index) => {
-                  const Icon = item.icon;
-                  // Lógica activa mejorada para incluir subrutas
-                  const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
-                  
-                  return (
-                    <Button
-                      key={index}
-                      asChild
-                      variant={isActive ? "secondary" : "ghost"}
-                      className={cn(
-                        "w-full justify-start transition-all",
-                        isActive && "bg-secondary font-medium shadow-sm"
-                      )}
-                    >
-                      <Link href={item.href}>
-                        <Icon className="mr-2 h-4 w-4" />
-                        {item.title}
-                      </Link>
-                    </Button>
-                  );
-                })}
-              </nav>
-            </ScrollArea>
+    <div 
+      className={cn(
+        "relative flex flex-col h-screen bg-card border-r border-border transition-all duration-300 ease-in-out z-20",
+        isCollapsed ? "w-20" : "w-64"
+      )}
+    >
+      {/* Toggle Button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute -right-3 top-6 h-6 w-6 rounded-full border bg-background shadow-md z-30 hidden md:flex items-center justify-center hover:bg-accent"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
+        {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+      </Button>
+
+      <div className="space-y-4 py-4 flex-1 flex flex-col overflow-hidden">
+        {/* LOGO AREA */}
+        <div className={cn("px-3 py-2 h-12 flex items-center", isCollapsed ? "justify-center" : "justify-start")}>
+          <div className="flex items-center gap-2 px-2 overflow-hidden">
+            <ShieldAlert className="h-8 w-8 text-indigo-600 shrink-0" />
+            <span className={cn(
+              "text-xl font-bold tracking-tight text-foreground transition-all duration-300 whitespace-nowrap",
+              isCollapsed ? "opacity-0 w-0" : "opacity-100 w-auto"
+            )}>
+              OASIS
+            </span>
           </div>
         </div>
+        
+        {/* NAVIGATION ITEMS */}
+        <ScrollArea className="flex-1 px-3">
+          <nav className="grid gap-2 group">
+            {items.map((item, index) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+              
+              return (
+                <Link
+                  key={index}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground relative group/item",
+                    isActive ? "bg-accent/80 text-accent-foreground shadow-sm" : "transparent",
+                    isCollapsed ? "justify-center" : "justify-start"
+                  )}
+                >
+                  <Icon className="h-5 w-5 shrink-0" />
+                  
+                  {/* Texto normal cuando está expandido */}
+                  <span className={cn(
+                    "transition-all duration-300 whitespace-nowrap",
+                    isCollapsed ? "opacity-0 w-0 hidden" : "opacity-100 w-auto"
+                  )}>
+                    {item.title}
+                  </span>
 
-        {/* ZONA INFERIOR FIJA */}
-        <div className="mt-auto">
-          {/* 1. Switcher de Modos (Nuevo componente) */}
-          <ViewModeSwitcher />
+                  {/* Tooltip flotante cuando está colapsado (Mejora UX) */}
+                  {isCollapsed && (
+                    <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-md opacity-0 group-hover/item:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                      {item.title}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        </ScrollArea>
 
-          {/* 2. Botón de Logout */}
-          <div className="p-4 border-t bg-muted/20">
-            <Button 
-              variant="outline" 
-              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-              onClick={handleLogout}
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              Cerrar Sesión
-            </Button>
-          </div>
+        {/* FOOTER SECTION */}
+        <div className="mt-auto px-3 pb-4 space-y-2">
+          {/* Switcher recibe el estado collapsed */}
+          <ViewModeSwitcher collapsed={isCollapsed} />
+          
+          <Button 
+            variant="ghost" 
+            className={cn(
+              "w-full text-red-600 hover:text-red-700 hover:bg-red-50 transition-all",
+              isCollapsed ? "justify-center px-0" : "justify-start"
+            )}
+            onClick={handleLogout}
+            title={isCollapsed ? "Cerrar Sesión" : ""}
+          >
+            <LogOut className={cn("h-5 w-5", !isCollapsed && "mr-2")} />
+            {!isCollapsed && "Cerrar Sesión"}
+          </Button>
         </div>
       </div>
     </div>
