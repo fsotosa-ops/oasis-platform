@@ -1,11 +1,11 @@
 'use client';
 
-import { useAuth } from '@/frontend/context/UserProvider';
-import { ProfileForm } from '@/frontend/components/settings/ProfileForm';
-import { TeamManager } from '@/frontend/components/settings/TeamManager';
-import { OrganizationSettings } from '@/frontend/components/settings/OrganizationSettings';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/frontend/components/ui/tabs';
-import { RoleGuard } from '@/frontend/components/auth/RoleGuard';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { ProfileForm } from '@/features/settings/components/ProfileForm';
+import { TeamManager } from '@/features/settings/components/TeamManager';
+import { OrganizationSettings } from '@/features/settings/components/OrganizationSettings';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
+import { RoleGuard } from '@/shared/components/guards/RoleGuard';
 import { Settings, Users, Building2, Loader2 } from 'lucide-react';
 
 export default function SettingsPage() {

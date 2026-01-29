@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { PROTECTED_ROUTES, PUBLIC_ROUTES, matchRoute, findRouteConfig } from '@/core/config/routes';
+import { PUBLIC_ROUTES, matchRoute, findRouteConfig } from '@/core/config/routes';
 import { hasPermission } from '@/core/config/permissions';
 import type { OrganizationRole } from '@/core/types';
 
@@ -9,21 +9,14 @@ const ORG_COOKIE_NAME = 'oasis_current_org';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for static files
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.includes('.')
-  ) {
-    return NextResponse.next();
-  }
-
-  // Create response object ONCE at the start
+  // 1. Crear respuesta inicial
   let response = NextResponse.next({
     request: {
       headers: request.headers,
     },
   });
 
+  // 2. Configurar cliente Supabase
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -33,12 +26,11 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          // First update the request cookies (for subsequent middleware/server code)
+          // Actualizar request cookies para que el servidor las vea
           cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value);
           });
-
-          // Then set the response cookies (for the browser)
+          // Actualizar response cookies para que el navegador las guarde
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
@@ -47,41 +39,50 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if needed
+  // 3. Refrescar sesión (esto puede modificar las cookies en 'response')
   const { data: { user }, error } = await supabase.auth.getUser();
 
-  // Check if route is public
+  // 4. Verificar ruta pública
   const isPublic = PUBLIC_ROUTES.some(route => matchRoute(pathname, route));
 
-  // If not authenticated
+  // --- LÓGICA DE REDIRECCIÓN CON PRESERVACIÓN DE COOKIES ---
+
+  // CASO A: Usuario NO autenticado
   if (error || !user) {
-    // Allow public routes
+    // Si la ruta es pública, permitimos el paso
     if (isPublic) {
       return response;
     }
 
-    // Redirect to login for protected routes
+    // Si es privada, redirigimos al login
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+    
+    // IMPORTANTE: Crear redirección y copiar las cookies de la respuesta original
+    // (por si supabase intentó limpiar una sesión inválida)
+    const redirectResponse = NextResponse.redirect(loginUrl);
+    copyCookies(response, redirectResponse);
+    return redirectResponse;
   }
 
-  // User is authenticated
-
-  // Redirect away from auth pages if already logged in
-  if (isPublic && (pathname === '/login' || pathname === '/register')) {
-    return NextResponse.redirect(new URL('/', request.url));
+  // CASO B: Usuario autenticado
+  if (user) {
+    // Si intenta entrar a login/register estando logueado -> ir a Dashboard
+    if (isPublic && (pathname === '/login' || pathname === '/register')) {
+      const dashboardUrl = new URL('/participant', request.url);
+      const redirectResponse = NextResponse.redirect(dashboardUrl);
+      copyCookies(response, redirectResponse);
+      return redirectResponse;
+    }
   }
 
-  // Find route config for protected routes
+  // 5. Verificación de Roles (RBAC) para rutas protegidas
   const routeConfig = findRouteConfig(pathname);
 
   if (routeConfig) {
-    // Get user's role in current organization
     const orgId = request.cookies.get(ORG_COOKIE_NAME)?.value;
 
     if (routeConfig.isPlatformAdminOnly) {
-      // Check if user is platform admin
       const { data: profile } = await supabase
         .from('profiles')
         .select('is_platform_admin')
@@ -89,10 +90,11 @@ export async function middleware(request: NextRequest) {
         .single();
 
       if (!profile?.is_platform_admin) {
-        return NextResponse.redirect(new URL('/', request.url));
+        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
+        copyCookies(response, redirectResponse);
+        return redirectResponse;
       }
     } else if (routeConfig.minRole || routeConfig.roles) {
-      // Get user's role in current organization
       let memberQuery = supabase
         .from('organization_members')
         .select('role')
@@ -106,20 +108,20 @@ export async function middleware(request: NextRequest) {
       const { data: membership } = await memberQuery.limit(1).single();
 
       if (!membership) {
-        // User has no active organization membership
-        return NextResponse.redirect(new URL('/', request.url));
+        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
+        copyCookies(response, redirectResponse);
+        return redirectResponse;
       }
 
       const userRole = membership.role as OrganizationRole;
 
-      // Check specific roles
-      if (routeConfig.roles && !routeConfig.roles.includes(userRole)) {
-        return NextResponse.redirect(new URL('/', request.url));
-      }
-
-      // Check minimum role
-      if (routeConfig.minRole && !hasPermission(userRole, routeConfig.minRole)) {
-        return NextResponse.redirect(new URL('/', request.url));
+      if (
+        (routeConfig.roles && !routeConfig.roles.includes(userRole)) ||
+        (routeConfig.minRole && !hasPermission(userRole, routeConfig.minRole))
+      ) {
+        const redirectResponse = NextResponse.redirect(new URL('/', request.url));
+        copyCookies(response, redirectResponse);
+        return redirectResponse;
       }
     }
   }
@@ -127,15 +129,18 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
+/**
+ * Función auxiliar para transferir cookies entre respuestas.
+ * Esto evita que se pierda la sesión (o el cierre de sesión) al redirigir.
+ */
+function copyCookies(source: NextResponse, target: NextResponse) {
+  source.cookies.getAll().forEach((cookie) => {
+    target.cookies.set(cookie);
+  });
+}
+
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder assets
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
