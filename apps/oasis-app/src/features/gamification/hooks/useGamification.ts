@@ -125,11 +125,12 @@ export function useGamification(): UseGamificationReturn {
       // Fetch leaderboard for current organization
       if (currentOrg) {
         const { data: leaderboardData, error: leaderboardError } = await supabase
+          .schema('journeys')
           .from('enrollments')
           .select(`
             user_id,
             points_earned,
-            profile:profiles!enrollments_user_id_fkey (
+            profile:profiles (
               id,
               full_name,
               avatar_url

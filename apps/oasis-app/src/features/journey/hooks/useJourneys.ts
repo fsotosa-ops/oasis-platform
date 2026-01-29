@@ -32,7 +32,12 @@ export function useJourneys(options: UseJourneysOptions = {}): UseJourneysReturn
   const supabase = createClient();
 
   const fetchJourneys = useCallback(async () => {
-    if (!currentOrg) {
+    // Corrección para evitar crashes si currentOrg tiene estructura anidada o es null
+    const orgId = currentOrg && 'id' in currentOrg 
+        ? (currentOrg as any).id 
+        : (currentOrg as any)?.data?.id;
+
+    if (!orgId) {
       setJourneys([]);
       setIsLoading(false);
       return;
@@ -42,11 +47,12 @@ export function useJourneys(options: UseJourneysOptions = {}): UseJourneysReturn
       setIsLoading(true);
       setError(null);
 
-      // Build query for journeys
+      // 1. Fetch Journeys desde el schema 'journeys'
       let query = supabase
+        .schema('journeys') // <--- CRÍTICO: Apuntar al schema correcto
         .from('journeys')
         .select('*')
-        .eq('organization_id', currentOrg.data.id)
+        .eq('organization_id', orgId)
         .order('created_at', { ascending: false });
 
       if (options.status) {
@@ -57,26 +63,25 @@ export function useJourneys(options: UseJourneysOptions = {}): UseJourneysReturn
 
       if (journeysError) throw journeysError;
 
-      // Get enrollments for current user
+      // 2. Fetch Enrollments para el usuario actual
       let enrollmentsMap: Map<string, Enrollment> = new Map();
 
       if (profile) {
-        const { data: enrollmentsData, error: enrollmentsError } = await supabase
+        const { data: enrollmentsData } = await supabase
+          .schema('journeys') // <--- CRÍTICO
           .from('enrollments')
           .select('*')
           .eq('user_id', profile.id);
 
-        if (enrollmentsError) {
-          console.error('Error fetching enrollments:', enrollmentsError);
-        } else if (enrollmentsData) {
+        if (enrollmentsData) {
           enrollmentsMap = new Map(
             enrollmentsData.map((e) => [e.journey_id, e as Enrollment])
           );
         }
       }
 
-      // Combine journeys with enrollment status
-      let combinedJourneys: JourneyWithEnrollment[] = (journeysData || []).map(
+      // 3. Combinar datos
+      const combinedJourneys: JourneyWithEnrollment[] = (journeysData || []).map(
         (journey) => {
           const enrollment = enrollmentsMap.get(journey.id);
           return {
@@ -87,15 +92,15 @@ export function useJourneys(options: UseJourneysOptions = {}): UseJourneysReturn
         }
       );
 
-      // Filter to only enrolled if requested
-      if (options.onlyEnrolled) {
-        combinedJourneys = combinedJourneys.filter((j) => j.isEnrolled);
-      }
+      // 4. Filtrar si es necesario
+      const finalJourneys = options.onlyEnrolled
+        ? combinedJourneys.filter((j) => j.isEnrolled)
+        : combinedJourneys;
 
-      setJourneys(combinedJourneys);
-    } catch (err) {
-      console.error('Error fetching journeys:', err);
-      setError(err instanceof Error ? err.message : 'Error al cargar journeys');
+      setJourneys(finalJourneys);
+    } catch (err: any) {
+      console.error('Error fetching journeys:', JSON.stringify(err, null, 2));
+      setError(err?.message || 'Error al cargar journeys');
     } finally {
       setIsLoading(false);
     }
@@ -121,11 +126,8 @@ export function useJourneys(options: UseJourneysOptions = {}): UseJourneysReturn
   };
 }
 
-/**
- * Hook to get a single journey with full details
- */
 export function useJourneyDetails(journeyId: string) {
-  const { currentOrg, profile } = useAuth();
+  const { profile } = useAuth();
   const [journey, setJourney] = useState<JourneyWithEnrollment | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +146,7 @@ export function useJourneyDetails(journeyId: string) {
       setError(null);
 
       const { data: journeyData, error: journeyError } = await supabase
+        .schema('journeys') // <--- CRÍTICO
         .from('journeys')
         .select('*')
         .eq('id', journeyId)
@@ -155,11 +158,12 @@ export function useJourneyDetails(journeyId: string) {
 
       if (profile) {
         const { data: enrollmentData } = await supabase
+          .schema('journeys') // <--- CRÍTICO
           .from('enrollments')
           .select('*')
           .eq('journey_id', journeyId)
           .eq('user_id', profile.id)
-          .single();
+          .maybeSingle();
 
         enrollment = enrollmentData as Enrollment | undefined;
       }
@@ -169,9 +173,9 @@ export function useJourneyDetails(journeyId: string) {
         enrollment,
         isEnrolled: !!enrollment,
       });
-    } catch (err) {
-      console.error('Error fetching journey:', err);
-      setError(err instanceof Error ? err.message : 'Error al cargar el journey');
+    } catch (err: any) {
+      console.error('Error fetching journey:', JSON.stringify(err, null, 2));
+      setError(err?.message || 'Error al cargar el journey');
     } finally {
       setIsLoading(false);
     }

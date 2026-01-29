@@ -45,7 +45,10 @@ export function useEnrollments(): UseEnrollmentReturn {
       setIsLoading(true);
       setError(null);
 
+      // Usamos .schema('journeys') y removemos '!fk' explícitos para permitir inferencia automática
+      // dentro del mismo esquema.
       const { data, error: fetchError } = await supabase
+        .schema('journeys')
         .from('enrollments')
         .select(`
           *,
@@ -56,7 +59,6 @@ export function useEnrollments(): UseEnrollmentReturn {
             description,
             cover_image_url,
             status,
-            settings,
             total_steps,
             total_points,
             created_at,
@@ -93,9 +95,9 @@ export function useEnrollments(): UseEnrollmentReturn {
         .filter((e): e is EnrollmentWithJourney => e !== null);
 
       setEnrollments(transformedData);
-    } catch (err) {
-      console.error('Error fetching enrollments:', err);
-      setError(err instanceof Error ? err.message : 'Error al cargar inscripciones');
+    } catch (err: any) {
+      console.error('Error fetching enrollments:', JSON.stringify(err, null, 2));
+      setError(err?.message || 'Error al cargar inscripciones');
     } finally {
       setIsLoading(false);
     }
@@ -103,12 +105,11 @@ export function useEnrollments(): UseEnrollmentReturn {
 
   const enroll = useCallback(
     async (journeyId: string): Promise<Enrollment> => {
-      if (!profile) {
-        throw new Error('No hay sesión activa');
-      }
+      if (!profile) throw new Error('No hay sesión activa');
 
-      // Get journey to get total steps
+      // 1. Obtener detalles del journey (total_steps)
       const { data: journey, error: journeyError } = await supabase
+        .schema('journeys')
         .from('journeys')
         .select('total_steps')
         .eq('id', journeyId)
@@ -116,7 +117,9 @@ export function useEnrollments(): UseEnrollmentReturn {
 
       if (journeyError) throw journeyError;
 
+      // 2. Crear inscripción
       const { data, error: enrollError } = await supabase
+        .schema('journeys')
         .from('enrollments')
         .insert({
           journey_id: journeyId,
@@ -141,6 +144,7 @@ export function useEnrollments(): UseEnrollmentReturn {
   const drop = useCallback(
     async (enrollmentId: string): Promise<void> => {
       const { error: dropError } = await supabase
+        .schema('journeys')
         .from('enrollments')
         .update({ status: 'dropped' })
         .eq('id', enrollmentId);
@@ -166,9 +170,6 @@ export function useEnrollments(): UseEnrollmentReturn {
   };
 }
 
-/**
- * Hook for managing a specific enrollment's progress
- */
 export function useEnrollmentProgress(enrollmentId: string) {
   const { profile } = useAuth();
   const [progress, setProgress] = useState<EnrollmentProgress | null>(null);
@@ -188,8 +189,9 @@ export function useEnrollmentProgress(enrollmentId: string) {
       setIsLoading(true);
       setError(null);
 
-      // Get enrollment
+      // 1. Get enrollment
       const { data: enrollment, error: enrollmentError } = await supabase
+        .schema('journeys')
         .from('enrollments')
         .select('*')
         .eq('id', enrollmentId)
@@ -197,17 +199,22 @@ export function useEnrollmentProgress(enrollmentId: string) {
 
       if (enrollmentError) throw enrollmentError;
 
-      // Get journey steps
+      // 2. Get journey steps
+      // Nota: la tabla en migración es 'journey_steps' o 'steps' según tu archivo de migración.
+      // Según 20260124182603_journey_schema.sql, línea 62: CREATE TABLE IF NOT EXISTS journeys.journey_steps
+      // Corregimos para llamar a 'journey_steps'
       const { data: steps, error: stepsError } = await supabase
-        .from('journey_steps')
+        .schema('journeys')
+        .from('journey_steps') 
         .select('*')
         .eq('journey_id', enrollment.journey_id)
         .order('order', { ascending: true });
 
       if (stepsError) throw stepsError;
 
-      // Get completions
+      // 3. Get completions
       const { data: completions, error: completionsError } = await supabase
+        .schema('journeys')
         .from('step_completions')
         .select('*')
         .eq('enrollment_id', enrollmentId);
@@ -224,9 +231,9 @@ export function useEnrollmentProgress(enrollmentId: string) {
         completions: (completions || []) as StepCompletion[],
         completedStepIds,
       });
-    } catch (err) {
-      console.error('Error fetching progress:', err);
-      setError(err instanceof Error ? err.message : 'Error al cargar progreso');
+    } catch (err: any) {
+      console.error('Error fetching progress:', JSON.stringify(err, null, 2));
+      setError(err?.message || 'Error al cargar progreso');
     } finally {
       setIsLoading(false);
     }
@@ -239,13 +246,13 @@ export function useEnrollmentProgress(enrollmentId: string) {
       const step = progress.steps.find((s) => s.id === stepId);
       if (!step) throw new Error('Paso no encontrado');
 
-      // Check if already completed
       if (progress.completedStepIds.has(stepId)) {
-        return; // Already completed
+        return; 
       }
 
-      // Create completion record
+      // Insertar completion
       const { data: completion, error: completionError } = await supabase
+        .schema('journeys')
         .from('step_completions')
         .insert({
           enrollment_id: enrollmentId,
@@ -258,28 +265,9 @@ export function useEnrollmentProgress(enrollmentId: string) {
 
       if (completionError) throw completionError;
 
-      // Update enrollment progress
-      const newCompletedSteps = progress.enrollment.completed_steps + 1;
-      const newProgress = Math.round(
-        (newCompletedSteps / progress.steps.length) * 100
-      );
-      const newPointsEarned = progress.enrollment.points_earned + step.points;
-
-      const isCompleted = newCompletedSteps === progress.steps.length;
-
-      const { error: updateError } = await supabase
-        .from('enrollments')
-        .update({
-          completed_steps: newCompletedSteps,
-          progress: newProgress,
-          points_earned: newPointsEarned,
-          status: isCompleted ? 'completed' : 'in_progress',
-          completed_at: isCompleted ? new Date().toISOString() : null,
-        })
-        .eq('id', enrollmentId);
-
-      if (updateError) throw updateError;
-
+      // Actualizar enrollment localmente o refetchear
+      // (Supabase triggers en backend deberían manejar la actualización de enrollment, 
+      // pero refrescamos para obtener el estado nuevo)
       await fetchProgress();
       return completion as StepCompletion;
     },

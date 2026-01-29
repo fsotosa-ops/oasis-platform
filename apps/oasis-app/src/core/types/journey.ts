@@ -104,6 +104,11 @@ export interface EnrollmentWithJourney extends Enrollment {
   journey: Journey;
 }
 
+export interface JourneyWithEnrollment extends Journey {
+  enrollment?: Enrollment;
+  isEnrolled: boolean;
+}
+
 /**
  * Step completion record
  */
