@@ -38,7 +38,8 @@ class CommonSettings(BaseSettings):
 
     # --- App Metadatos ---
 
-    GOOGLE_API_KEY: str
+    # Optional: Only required for auth_service (AI features)
+    GOOGLE_API_KEY: str | None = None
     ENVIRONMENT: str = "development"
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Oasis Digital API"
