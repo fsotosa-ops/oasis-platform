@@ -156,6 +156,9 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          # Service account for Cloud Run runtime (same as deployer, has secretAccessor)
+          RUNTIME_SA="${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
           # Base secrets for all services (ES256 with JWKS - no JWT_SECRET needed)
           SECRETS="SUPABASE_URL=SUPABASE_URL_PROD:latest"
           SECRETS="${SECRETS},SUPABASE_ANON_KEY=SUPABASE_ANON_KEY_PROD:latest"
@@ -194,6 +197,7 @@ jobs:
             --image=${{ steps.vars.outputs.image_tag }} \
             --region=${{ env.GCP_REGION }} \
             --platform=managed \
+            --service-account="${RUNTIME_SA}" \
             --port=${{ matrix.port }} \
             --memory=1Gi \
             --cpu=1 \
