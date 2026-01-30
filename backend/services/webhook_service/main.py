@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("Iniciando Webhook Service...")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Supabase URL: {settings.SUPABASE_URL[:50] if settings.SUPABASE_URL else 'NOT SET'}...")
 
     # Initialize provider registry
     registry = get_registry()

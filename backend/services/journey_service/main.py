@@ -17,14 +17,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the Journey Service."""
     logger.info(f"Starting {settings.PROJECT_NAME}...")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Supabase URL: {settings.SUPABASE_URL[:50]}...")
 
-    # Verify database connection on startup
+    # Verify database connection on startup (non-blocking in dev/cloud)
     try:
         await verify_connection()
         logger.info("Database connection verified")
     except Exception as e:
-        logger.error(f"Database connection failed: {e}")
-        raise
+        logger.warning(f"Database connection check failed: {e}")
+        # Don't fail startup - connection will be retried on first request
+        # This allows the health endpoint to work for Cloud Run probes
 
     yield
 
