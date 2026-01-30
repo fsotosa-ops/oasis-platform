@@ -92,6 +92,7 @@ jobs:
           SUPABASE_URL: "https://test.supabase.co"
           SUPABASE_ANON_KEY: "test-anon-key"
           SUPABASE_SERVICE_ROLE_KEY: "test-service-key"
+          JWT_ALGORITHM: "HS256"
           SUPABASE_JWT_SECRET: "test-jwt-secret-min-32-characters-long"
 
   docker-build:

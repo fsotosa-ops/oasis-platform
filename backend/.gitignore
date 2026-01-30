@@ -74,3 +74,6 @@ dmypy.json
 
 # OS
 .DS_Store
+
+# Deploy GCP
+setup-all-dev.sh

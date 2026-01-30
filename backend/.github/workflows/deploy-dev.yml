@@ -132,12 +132,10 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          # Base secrets for all services
+          # Base secrets for all services (ES256 with JWKS - no JWT_SECRET needed)
           SECRETS="SUPABASE_URL=SUPABASE_URL_DEV:latest"
           SECRETS="${SECRETS},SUPABASE_ANON_KEY=SUPABASE_ANON_KEY_DEV:latest"
           SECRETS="${SECRETS},SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY_DEV:latest"
-          SECRETS="${SECRETS},SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET_DEV:latest"
-          SECRETS="${SECRETS},JWT_ALGORITHM=JWT_ALGORITHM:latest"
 
           # Service-specific secrets
           if [[ "${{ matrix.service }}" == "auth_service" ]]; then
@@ -156,6 +154,7 @@ jobs:
 
           # Environment variables
           ENV_VARS="ENVIRONMENT=development"
+          ENV_VARS="${ENV_VARS},JWT_ALGORITHM=ES256"
 
           # Add journey service URL for webhook service
           if [[ "${{ matrix.service }}" == "webhook_service" ]]; then
