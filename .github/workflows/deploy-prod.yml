@@ -1,0 +1,240 @@
+# ============================================================================
+# Deploy to Production Environment
+#
+# Triggered on:
+# - GitHub Release (published)
+# - Manual workflow dispatch
+#
+# Builds and deploys all services to Cloud Run (production environment)
+# ============================================================================
+
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "production" to confirm deployment'
+        required: true
+        type: string
+
+env:
+  GCP_REGION: us-central1
+  REPO_NAME: oasis-api
+
+jobs:
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate manual trigger
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ inputs.confirm }}" != "production" ]]; then
+            echo "Error: You must type 'production' to confirm deployment"
+            exit 1
+          fi
+          echo "Manual deployment confirmed"
+
+      - name: Log release info
+        if: github.event_name == 'release'
+        run: |
+          echo "Deploying release: ${{ github.event.release.tag_name }}"
+          echo "Release name: ${{ github.event.release.name }}"
+
+  build-and-push:
+    name: Build & Push - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: prod
+
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        service:
+          - auth_service
+          - journey_service
+          - webhook_service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tag
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="manual-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          IMAGE_TAG="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:${VERSION}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: backend/services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image_tag }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:prod-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: prod
+
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        include:
+          - service: auth_service
+            service_name: auth-service
+            port: 8080
+          - service: journey_service
+            service_name: journey-service
+            port: 8080
+          - service: webhook_service
+            service_name: webhook-service
+            port: 8080
+
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Generate image tag
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="manual-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          IMAGE_TAG="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:${VERSION}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Cloud Run
+        run: |
+          # Base secrets for all services (ES256 with JWKS - no JWT_SECRET needed)
+          SECRETS="SUPABASE_URL=SUPABASE_URL_PROD:latest"
+          SECRETS="${SECRETS},SUPABASE_ANON_KEY=SUPABASE_ANON_KEY_PROD:latest"
+          SECRETS="${SECRETS},SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY_PROD:latest"
+
+          # Service-specific secrets
+          if [[ "${{ matrix.service }}" == "auth_service" ]]; then
+            SECRETS="${SECRETS},GOOGLE_API_KEY=GOOGLE_API_KEY_PROD:latest"
+          fi
+
+          if [[ "${{ matrix.service }}" == "journey_service" ]]; then
+            SECRETS="${SECRETS},SERVICE_TO_SERVICE_TOKEN=SERVICE_TO_SERVICE_TOKEN_PROD:latest"
+          fi
+
+          if [[ "${{ matrix.service }}" == "webhook_service" ]]; then
+            SECRETS="${SECRETS},SERVICE_TO_SERVICE_TOKEN=SERVICE_TO_SERVICE_TOKEN_PROD:latest"
+            SECRETS="${SECRETS},WEBHOOK_TYPEFORM_SECRET=WEBHOOK_TYPEFORM_SECRET_PROD:latest"
+            SECRETS="${SECRETS},WEBHOOK_STRIPE_SECRET=WEBHOOK_STRIPE_SECRET_PROD:latest"
+          fi
+
+          # Environment variables
+          ENV_VARS="ENVIRONMENT=production"
+          ENV_VARS="${ENV_VARS},JWT_ALGORITHM=ES256"
+
+          # Add journey service URL for webhook service
+          if [[ "${{ matrix.service }}" == "webhook_service" ]]; then
+            JOURNEY_URL=$(gcloud run services describe journey-service \
+              --region=${{ env.GCP_REGION }} \
+              --format='value(status.url)' 2>/dev/null || echo "")
+            if [[ -n "$JOURNEY_URL" ]]; then
+              ENV_VARS="${ENV_VARS},JOURNEY_SERVICE_URL=${JOURNEY_URL}"
+            fi
+          fi
+
+          gcloud run deploy ${{ matrix.service_name }} \
+            --image=${{ steps.vars.outputs.image_tag }} \
+            --region=${{ env.GCP_REGION }} \
+            --platform=managed \
+            --port=${{ matrix.port }} \
+            --memory=1Gi \
+            --cpu=1 \
+            --min-instances=1 \
+            --max-instances=10 \
+            --timeout=300 \
+            --concurrency=80 \
+            --set-secrets="${SECRETS}" \
+            --set-env-vars="${ENV_VARS}" \
+            --no-allow-unauthenticated \
+            --quiet
+
+      - name: Get service URL
+        run: |
+          URL=$(gcloud run services describe ${{ matrix.service_name }} \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "Service deployed to: $URL"
+
+  notify:
+    name: Production Deployment Summary
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "============================================"
+          echo "Production Deployment Complete!"
+          echo "============================================"
+          echo ""
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "Version: ${{ github.event.release.tag_name }}"
+          else
+            echo "Commit: ${{ github.sha }}"
+          fi
+          echo ""
+          echo "Services deployed:"
+          echo "  - auth-service (PROD)"
+          echo "  - journey-service (PROD)"
+          echo "  - webhook-service (PROD)"
+          echo ""
+          echo "NOTE: Production services require IAM authentication"

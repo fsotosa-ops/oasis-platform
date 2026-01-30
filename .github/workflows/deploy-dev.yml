@@ -1,0 +1,212 @@
+# ============================================================================
+# Deploy to Development Environment
+#
+# Triggered on:
+# - Push to develop branch
+#
+# Builds and deploys all services to Cloud Run (dev environment)
+# ============================================================================
+
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+env:
+  GCP_REGION: us-central1
+  REPO_NAME: oasis-api
+
+jobs:
+  build-and-push:
+    name: Build & Push - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    environment: dev
+
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        service:
+          - auth_service
+          - journey_service
+          - webhook_service
+
+    outputs:
+      auth_service_image: ${{ steps.set-output.outputs.auth_service_image }}
+      journey_service_image: ${{ steps.set-output.outputs.journey_service_image }}
+      webhook_service_image: ${{ steps.set-output.outputs.webhook_service_image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tag
+        id: vars
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_TAG="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:${SHORT_SHA}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: backend/services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image_tag }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set output for deploy job
+        id: set-output
+        run: |
+          echo "${{ matrix.service }}_image=${{ steps.vars.outputs.image_tag }}" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: dev
+
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        include:
+          - service: auth_service
+            service_name: auth-service-dev
+            port: 8080
+          - service: journey_service
+            service_name: journey-service-dev
+            port: 8080
+          - service: webhook_service
+            service_name: webhook-service-dev
+            port: 8080
+
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Generate image tag
+        id: vars
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_TAG="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ matrix.service }}:${SHORT_SHA}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Cloud Run
+        run: |
+          # Base secrets for all services (ES256 with JWKS - no JWT_SECRET needed)
+          SECRETS="SUPABASE_URL=SUPABASE_URL_DEV:latest"
+          SECRETS="${SECRETS},SUPABASE_ANON_KEY=SUPABASE_ANON_KEY_DEV:latest"
+          SECRETS="${SECRETS},SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY_DEV:latest"
+
+          # Service-specific secrets
+          if [[ "${{ matrix.service }}" == "auth_service" ]]; then
+            SECRETS="${SECRETS},GOOGLE_API_KEY=GOOGLE_API_KEY_DEV:latest"
+          fi
+
+          if [[ "${{ matrix.service }}" == "journey_service" ]]; then
+            SECRETS="${SECRETS},SERVICE_TO_SERVICE_TOKEN=SERVICE_TO_SERVICE_TOKEN_DEV:latest"
+          fi
+
+          if [[ "${{ matrix.service }}" == "webhook_service" ]]; then
+            SECRETS="${SECRETS},SERVICE_TO_SERVICE_TOKEN=SERVICE_TO_SERVICE_TOKEN_DEV:latest"
+            SECRETS="${SECRETS},WEBHOOK_TYPEFORM_SECRET=WEBHOOK_TYPEFORM_SECRET_DEV:latest"
+            SECRETS="${SECRETS},WEBHOOK_STRIPE_SECRET=WEBHOOK_STRIPE_SECRET_DEV:latest"
+          fi
+
+          # Environment variables
+          ENV_VARS="ENVIRONMENT=development"
+          ENV_VARS="${ENV_VARS},JWT_ALGORITHM=ES256"
+
+          # Add journey service URL for webhook service
+          if [[ "${{ matrix.service }}" == "webhook_service" ]]; then
+            JOURNEY_URL=$(gcloud run services describe journey-service-dev \
+              --region=${{ env.GCP_REGION }} \
+              --format='value(status.url)' 2>/dev/null || echo "")
+            if [[ -n "$JOURNEY_URL" ]]; then
+              ENV_VARS="${ENV_VARS},JOURNEY_SERVICE_URL=${JOURNEY_URL}"
+            fi
+          fi
+
+          gcloud run deploy ${{ matrix.service_name }} \
+            --image=${{ steps.vars.outputs.image_tag }} \
+            --region=${{ env.GCP_REGION }} \
+            --platform=managed \
+            --port=${{ matrix.port }} \
+            --memory=512Mi \
+            --cpu=1 \
+            --min-instances=0 \
+            --max-instances=2 \
+            --timeout=300 \
+            --concurrency=80 \
+            --set-secrets="${SECRETS}" \
+            --set-env-vars="${ENV_VARS}" \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Get service URL
+        run: |
+          URL=$(gcloud run services describe ${{ matrix.service_name }} \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "Service deployed to: $URL"
+          echo "Health check: $URL/health"
+
+  notify:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "============================================"
+          echo "Deployment to Dev Complete!"
+          echo "============================================"
+          echo ""
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo ""
+          echo "Services deployed:"
+          echo "  - auth-service-dev"
+          echo "  - journey-service-dev"
+          echo "  - webhook-service-dev"
