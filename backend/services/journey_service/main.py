@@ -16,13 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.config import get_settings
 from common.database.client import close_db_connections, health_check, verify_connection
 from common.exceptions import OasisException, oasis_exception_handler
-from common.logging import configure_logging
-from common.middleware import AuditMiddleware, RateLimitConfig, setup_rate_limiting
+from common.middleware import RateLimitConfig, setup_rate_limiting
 from services.journey_service.api.v1.api import api_router
 from services.journey_service.core.config import settings
-
-# Configure logging before anything else
-configure_logging("journey_service")
 
 global_settings = get_settings()
 
@@ -165,9 +161,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Audit middleware for automatic operation logging
-app.add_middleware(AuditMiddleware, service_name="journey_service")
 
 
 # ============================================================================

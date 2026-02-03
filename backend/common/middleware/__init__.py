@@ -2,7 +2,6 @@
 """
 Middleware components for OASIS services.
 """
-from common.middleware.audit import AuditMiddleware
 from common.middleware.rate_limit import (
     RateLimitConfig,
     limit_auth,
@@ -14,7 +13,6 @@ from common.middleware.rate_limit import (
 )
 
 __all__ = [
-    "AuditMiddleware",
     "limiter",
     "limit_auth",
     "limit_read",

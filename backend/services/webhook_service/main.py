@@ -15,14 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from common.config import get_settings
 from common.exceptions import OasisException, oasis_exception_handler
-from common.logging import configure_logging
-from common.middleware import AuditMiddleware
 from services.webhook_service.api.v1.api import api_router
 from services.webhook_service.core.config import settings
 from services.webhook_service.core.registry import get_registry
-
-# Configure logging before anything else
-configure_logging("webhook_service")
 
 global_settings = get_settings()
 
@@ -171,9 +166,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Audit middleware for automatic operation logging
-app.add_middleware(AuditMiddleware, service_name="webhook_service")
 
 
 # ============================================================================

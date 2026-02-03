@@ -33,15 +33,70 @@ Usage:
         ...
 """
 import logging
+import time
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 
+from common.config import settings
 from common.database.client import get_admin_client
 
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
+
+# ============================================================================
+# JWKS Cache with TTL
+# ============================================================================
+_jwks_cache: dict | None = None
+_jwks_cache_timestamp: float = 0
+JWKS_CACHE_TTL_SECONDS: int = 3600  # 1 hour
+
+
+async def get_jwks() -> dict:
+    """
+    Fetch and cache Supabase public keys with TTL.
+    Automatically refreshes when keys expire or rotate.
+    """
+    global _jwks_cache, _jwks_cache_timestamp
+
+    current_time = time.time()
+    cache_expired = (current_time - _jwks_cache_timestamp) > JWKS_CACHE_TTL_SECONDS
+
+    if _jwks_cache is None or cache_expired:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(settings.SUPABASE_JWKS_URL, timeout=10)
+                response.raise_for_status()
+                _jwks_cache = response.json()
+                _jwks_cache_timestamp = current_time
+                logging.info("JWKS cache refreshed successfully")
+            except httpx.TimeoutException as e:
+                logging.error(f"JWKS fetch timeout: {e}")
+                if _jwks_cache is not None:
+                    logging.warning("Using expired JWKS cache as fallback")
+                    return _jwks_cache
+                raise HTTPException(
+                    status_code=503, detail="Identity service unavailable"
+                ) from e
+            except Exception as e:
+                logging.error(f"JWKS fetch error: {e}")
+                if _jwks_cache is not None:
+                    return _jwks_cache
+                raise HTTPException(
+                    status_code=503, detail="Identity service error"
+                ) from e
+
+    return _jwks_cache
+
+
+def clear_jwks_cache():
+    """Clear JWKS cache. Useful for testing or forced refresh."""
+    global _jwks_cache, _jwks_cache_timestamp
+    _jwks_cache = None
+    _jwks_cache_timestamp = 0
 
 
 # ============================================================================
@@ -53,34 +108,30 @@ async def validate_token(
     auth: HTTPAuthorizationCredentials = Depends(security),  # noqa: B008
 ) -> dict:
     """
-    Validate JWT using Supabase's native validation.
-
-    Uses Supabase Auth's get_user() which handles all JWT validation internally,
-    including signature verification and expiration checks.
+    Validate JWT token using dynamic strategy (HS256 local / ES256 prod).
 
     Returns:
-        Dict with user claims: sub, email, aud
+        Decoded JWT payload
 
     Raises:
-        HTTPException 401: If token is invalid or expired
+        HTTPException 401: If token is invalid
     """
     token = auth.credentials
-    db = await get_admin_client()
-
     try:
-        user_response = await db.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        return {
-            "sub": str(user_response.user.id),
-            "email": user_response.user.email,
-            "aud": "authenticated",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.warning(f"Token validation failed: {e}")
+        if settings.JWT_ALGORITHM == "HS256":
+            return jwt.decode(
+                token,
+                settings.SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience=settings.JWT_AUDIENCE,
+            )
+        else:
+            jwks = await get_jwks()
+            return jwt.decode(
+                token, jwks, algorithms=["ES256"], audience=settings.JWT_AUDIENCE
+            )
+    except JWTError as e:
+        logging.warning(f"Invalid token: {e}")
         raise HTTPException(status_code=401, detail="Invalid token") from e
 
 
