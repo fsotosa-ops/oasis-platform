@@ -21,9 +21,13 @@ from common.database.client import (
     verify_connection,
 )
 from common.exceptions import OasisException, oasis_exception_handler
-from common.middleware import RateLimitConfig, setup_rate_limiting
+from common.logging import configure_logging
+from common.middleware import AuditMiddleware, RateLimitConfig, setup_rate_limiting
 from services.auth_service.api.v1.api import api_router
 from services.auth_service.core.config import settings
+
+# Configure logging before anything else
+configure_logging("auth_service")
 
 global_settings = get_settings()
 
@@ -155,6 +159,9 @@ if global_settings.BACKEND_CORS_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# Audit middleware for automatic operation logging
+app.add_middleware(AuditMiddleware, service_name="auth_service")
 
 
 # ============================================================================

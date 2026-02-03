@@ -11,30 +11,13 @@ class CommonSettings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_ANON_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
-    JWT_ALGORITHM: str = "ES256"  # ES256 (JWKS) or HS256 (secret)
+    # --- JWT Settings (DEPRECATED) ---
+    # These settings are kept for backwards compatibility but are no longer used.
+    # Token validation now uses Supabase's native db.auth.get_user() method.
+    JWT_ALGORITHM: str = "ES256"  # DEPRECATED: No longer used
     JWT_AUDIENCE: str = "authenticated"
-    # For HS256: required. For ES256: optional (uses JWKS instead)
-    SUPABASE_JWT_SECRET: str | None = None
-    # For ES256: auto-generated from SUPABASE_URL if not provided
-    SUPABASE_JWKS_URL: str | None = None
-
-    @validator("SUPABASE_JWKS_URL", pre=True, always=True)
-    def set_jwks_url(cls, v, values):
-        """Auto-generate JWKS URL from SUPABASE_URL if not provided."""
-        if v:
-            return v
-        supabase_url = values.get("SUPABASE_URL")
-        if supabase_url:
-            return f"{supabase_url}/auth/v1/.well-known/jwks.json"
-        return None
-
-    @validator("SUPABASE_JWT_SECRET", pre=True, always=True)
-    def validate_jwt_config(cls, v, values):
-        """Ensure JWT secret is provided if using HS256."""
-        algorithm = values.get("JWT_ALGORITHM", "ES256")
-        if algorithm == "HS256" and not v:
-            raise ValueError("SUPABASE_JWT_SECRET is required when using HS256")
-        return v
+    SUPABASE_JWT_SECRET: str | None = None  # DEPRECATED: No longer used
+    SUPABASE_JWKS_URL: str | None = None  # DEPRECATED: No longer used
 
     # --- App Metadatos ---
 
